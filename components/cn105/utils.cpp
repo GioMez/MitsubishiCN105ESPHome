@@ -452,51 +452,42 @@ int CN105Climate::lookupByteMapValue(const int valuesMap[], const uint8_t byteMa
  * This methode emulates the esp32 lock_guard feature with a boolean variable
  *
 */
-void CN105Climate::emulateMutex(const char* retryName, std::function<void()>&& f) {
-    this->set_retry(retryName, 100, 10, [this, f, retryName](uint8_t retry_count) {
-        if (this->wantedSettingsMutex) {
-            if (retry_count < 1) {
-                ESP_LOGW(retryName, "10 retry calls failed because mutex was locked, forcing unlock...");
-                this->wantedSettingsMutex = true;
-                f();
-                this->wantedSettingsMutex = false;
-                return RetryResult::DONE;
-            }
-            ESP_LOGI(retryName, "wantedSettingsMutex is already locked, defferring...");
-            return RetryResult::RETRY;
-        } else {
-            this->wantedSettingsMutex = true;
-            ESP_LOGD(retryName, "emulateMutex normal behaviour, locking...");
-            f();
-            ESP_LOGD(retryName, "emulateMutex unlocking...");
-            this->wantedSettingsMutex = false;
-            return RetryResult::DONE;
+void CN105Climate::runMutexRetry(const char* retryName, volatile bool* mutexFlag, const char* mutexName,
+    std::function<void()> action, uint8_t retryCount, uint32_t retryDelayMs) {
+    if (*mutexFlag) {
+        if (retryCount == 0) {
+            ESP_LOGW(retryName, "10 retry calls failed because mutex was locked, forcing unlock...");
+            *mutexFlag = true;
+            action();
+            *mutexFlag = false;
+            return;
         }
-        }, 1.2f);
+
+        ESP_LOGI(retryName, "%s is already locked, defferring...", mutexName);
+        const uint32_t nextRetryDelayMs = static_cast<uint32_t>(retryDelayMs * MUTEX_RETRY_BACKOFF_FACTOR);
+        this->set_timeout(retryName, retryDelayMs,
+            [this, retryName, mutexFlag, mutexName, action, retryCount, nextRetryDelayMs]() mutable {
+                this->runMutexRetry(retryName, mutexFlag, mutexName, std::move(action), retryCount - 1, nextRetryDelayMs);
+            });
+        return;
+    }
+
+    *mutexFlag = true;
+    ESP_LOGD(retryName, "emulateMutex normal behaviour, locking...");
+    action();
+    ESP_LOGD(retryName, "emulateMutex unlocking...");
+    *mutexFlag = false;
+}
+
+void CN105Climate::emulateMutex(const char* retryName, std::function<void()>&& f) {
+    this->runMutexRetry(retryName, &this->wantedSettingsMutex, "wantedSettingsMutex", std::move(f),
+        MUTEX_RETRY_ATTEMPTS - 1, MUTEX_RETRY_INITIAL_DELAY_MS);
 }
 #ifdef TEST_MODE
 
 void CN105Climate::testEmulateMutex(const char* retryName, std::function<void()>&& f) {
-    this->set_retry(retryName, 100, 10, [this, f, retryName](uint8_t retry_count) {
-        if (this->esp8266Mutex) {
-            if (retry_count < 1) {
-                ESP_LOGW(retryName, "10 retry calls failed because mutex was locked, forcing unlock...");
-                this->esp8266Mutex = true;
-                f();
-                this->esp8266Mutex = false;
-                return RetryResult::DONE;
-            }
-            ESP_LOGI(retryName, "testMutex is already locked, defferring...");
-            return RetryResult::RETRY;
-        } else {
-            this->esp8266Mutex = true;
-            ESP_LOGD(retryName, "emulateMutex normal behaviour, locking...");
-            f();
-            ESP_LOGD(retryName, "emulateMutex unlocking...");
-            this->esp8266Mutex = false;
-            return RetryResult::DONE;
-        }
-        }, 1.2f);
+    this->runMutexRetry(retryName, &this->esp8266Mutex, "testMutex", std::move(f),
+        MUTEX_RETRY_ATTEMPTS - 1, MUTEX_RETRY_INITIAL_DELAY_MS);
 }
 #endif
 #endif

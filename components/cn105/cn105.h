@@ -365,7 +365,13 @@ namespace esphome {
         void debugClimate(const char* settingName);
 
 #ifndef USE_ESP32
+        static constexpr uint32_t MUTEX_RETRY_INITIAL_DELAY_MS = 100;
+        static constexpr uint8_t MUTEX_RETRY_ATTEMPTS = 10;
+        static constexpr float MUTEX_RETRY_BACKOFF_FACTOR = 1.2f;
+
         void emulateMutex(const char* retryName, std::function<void()>&& f);
+        void runMutexRetry(const char* retryName, volatile bool* mutexFlag, const char* mutexName,
+            std::function<void()> action, uint8_t retryCount, uint32_t retryDelayMs);
 #endif
 
 
