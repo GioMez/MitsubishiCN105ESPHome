@@ -480,14 +480,18 @@ void CN105Climate::runMutexRetry(const char* retryName, volatile bool* mutexFlag
 }
 
 void CN105Climate::emulateMutex(const char* retryName, std::function<void()>&& f) {
-    this->runMutexRetry(retryName, &this->wantedSettingsMutex, "wantedSettingsMutex", std::move(f),
-        MUTEX_RETRY_ATTEMPTS - 1, MUTEX_RETRY_INITIAL_DELAY_MS);
+    this->set_timeout(retryName, 0, [this, retryName, action = std::move(f)]() mutable {
+        this->runMutexRetry(retryName, &this->wantedSettingsMutex, "wantedSettingsMutex", std::move(action),
+            MUTEX_RETRY_ATTEMPTS - 1, MUTEX_RETRY_INITIAL_DELAY_MS);
+    });
 }
 #ifdef TEST_MODE
 
 void CN105Climate::testEmulateMutex(const char* retryName, std::function<void()>&& f) {
-    this->runMutexRetry(retryName, &this->esp8266Mutex, "testMutex", std::move(f),
-        MUTEX_RETRY_ATTEMPTS - 1, MUTEX_RETRY_INITIAL_DELAY_MS);
+    this->set_timeout(retryName, 0, [this, retryName, action = std::move(f)]() mutable {
+        this->runMutexRetry(retryName, &this->esp8266Mutex, "testMutex", std::move(action),
+            MUTEX_RETRY_ATTEMPTS - 1, MUTEX_RETRY_INITIAL_DELAY_MS);
+    });
 }
 #endif
 #endif
